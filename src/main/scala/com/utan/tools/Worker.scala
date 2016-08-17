@@ -103,6 +103,8 @@ class PrimaryWorker(config: Config) extends Worker {
       and a.TABLE_OWNER = ${config.schema}
       order by a.table_name, a.index_name, a.column_position"""
 
+  val existTables =
+    sqls"""select table_name from all_tables a where a.OWNER = ${config.schema}"""
 
   //求当前库已经有的所有主键索引.
   val existsPrimaryKeyIndex =
@@ -163,6 +165,10 @@ class PrimaryWorker(config: Config) extends Worker {
     val allIndex = query(select)
     val allIndexNames = allIndex.keys.map({ case (_, i, _) => i }).toSet
 
+    implicit val session = AutoSession
+    //增加table是否有的判断.
+    val allTables = sql"${existTables}".map(_.string(1)).list.apply().toSet
+
     val before =
       s"""
          |-----------------------
@@ -177,7 +183,10 @@ class PrimaryWorker(config: Config) extends Worker {
               case Some(((_, i, _), _)) =>
                 s"--${k}的${v.mkString("(", ",", ")")}已经存在冲突的索引${i}冲突"
               case None =>
-                makePrimaryKey(k, makeName(allIndexNames), true, v)
+                if (allTables(k))
+                  makePrimaryKey(k, makeName(allIndexNames), true, v)
+                else
+                  s"--${k}表并不存在，忽略"
             }
           } else {
             s"--${k}已经有主键啦--"
